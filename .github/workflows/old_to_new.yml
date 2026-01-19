@@ -46,7 +46,7 @@ jobs:
         bin/payload-dumper-go -o all -p abl,xbl,xbl_config,xbl_ramdump old/payload.bin >>/dev/null
         echo "开始解压payload"
         bin/payload-dumper-go -o new-IMAGES new/payload.bin >>/dev/null
-        info=$(bin/gettype -i new-IMAGES/my_manifest)
+        info=$(bin/gettype -i new-IMAGES/my_manifest.img)
         if [ "$info" == "ext" ]; then
             echo "尝试使用7z解压"
             7z x "new-IMAGES/my_manifest.img" -y -o"my_manifest/"
@@ -60,60 +60,59 @@ jobs:
         rm -rf new-IMAGES/abl* new-IMAGES/xbl*
         mkdir all/IMAGES/
         mv new-IMAGES/* all/IMAGES
-        xxd -r bin/hex1 > all/my_company.img
-        xxd -r bin/hex2 > all/my_preload.img
+        xxd -r bin/hex1 > all/IMAGES/my_company.img
+        xxd -r bin/hex2 > all/IMAGES/my_preload.img
         cp -r META-INF/ all
+        cp -r tools/ all
+        mv all/*.img all/IMAGES/
         cd all
         DEVICE="$(cat ../my_manifest/build.prop | grep 'ro.vendor.oplus.market.enname' | cut -d'=' -f2)"
-        VERSION="$(cat ../my_manifest/build.prop | grep 'ro.build.display.id' | cut -d'=' -f2)"
+        VERSION="$(cat ../my_manifest/build.prop | grep 'ro.build.display.id.show' | cut -d'=' -f2)"
         
-        # 生成刷机信息
         cat > update_msg.txt << EOF
-ui_print "=================================="
-ui_print " " 
-ui_print "ColorOS Patch Updater"
-ui_print "auto by: @SakuraKyuo" 
-ui_print ""
-ui_print "Device: $DEVICE"
-ui_print "Version: $VERSION"
-ui_print " " 
-ui_print ""
-ui_print "=================================="
-EOF
+        ui_print "=================================="
+        ui_print " " 
+        ui_print "ColorOS Patch Updater"
+        ui_print "auto by: @SakuraKyuo" 
+        ui_print ""
+        ui_print "Device: $DEVICE"
+        ui_print "Version: $VERSION"
+        ui_print " " 
+        ui_print ""
+        ui_print "=================================="
+        EOF
 
         if grep -q "UPDATEMSG_INFINAL" META-INF/com/google/android/update-binary; then
           echo "Found placeholder, replacing..."
-          sed -i '/UPDATEMSG_INFINAL/ {
-            r update_msg.txt
-            d
-          }' flash_script.sh
+          sed -i -e '/UPDATEMSG_INFINAL/r update_msg.txt' -e '//d' META-INF/com/google/android/update-binary
           echo "Replacement successful"
         else
           echo "Placeholder not found!"
           exit 1
         fi
-        rm update_msg.txt
+        rm -rf update_msg.txt new old
         cd ..
-        
+
     - name: Repacking
       run: |
         cd all
-        zip -0 -r "$(cat ../my_manifest/build.prop | grep ro.build.display.ota | cut -d = -f 2)_Patch.zip" *
+        INFO="$(cat ../my_manifest/build.prop | grep ro.build.display.ota | cut -d = -f 2)"
+        zip -0 -r "${INFO}_Patch.zip" *
         cd ..
-        split -b 1900M --numeric-suffixes --suffix-length=2 "all/$(cat my_manifest/build.prop | grep ro.build.display.ota | cut -d = -f 2)_Patch.zip" $(cat my_manifest/build.prop | grep ro.build.display.ota | cut -d = -f 2)_Patch.zip
-        echo "cat $(ls $(cat my_manifest/build.prop | grep ro.build.display.ota | cut -d = -f 2)_Patch.z* | tr '\n' ' ') > $(cat my_manifest/build.prop | grep ro.build.display.ota | cut -d = -f 2)_Patch.zip" > Merge.sh
+        split -b 1900M --numeric-suffixes --suffix-length=2 "all/${INFO}_Patch.zip" "${INFO}_Patch.z"
+        echo "cat $(ls ${INFO}_Patch.z* | tr '\n' ' ') > \"${INFO}_Patch.zip\"" > Merge.sh
       id: pwd
 
     - name: Upload to Release
       uses: softprops/action-gh-release@v1
       with:
         files: | 
-          $(cat my_manifest/build.prop | grep ro.build.display.ota | cut -d = -f 2)_Patch.z*
+          *_Patch.z*
           Merge.sh
           all/META-INF/com/google/android/update-binary
         name: ${{ github.run_id }}
         tag_name: ${{ github.run_id }}
         body: |
-          Link: ${{ github.event.inputs.ROM_URL }}
+          "Update from old to new without circuit breaker"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
